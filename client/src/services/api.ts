@@ -5,7 +5,7 @@
 
 import { OverviewMetrics, ScanReport, ScanResult, WatchlistBrand, HealthStatus } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://phishtrap-scanner-server.vercel.app';
+const BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'https://phishtrap-scanner-server.vercel.app'}/api`;
 
 export class ApiError extends Error {
   constructor(message: string, public status?: number) {
