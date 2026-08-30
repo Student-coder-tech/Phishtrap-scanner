@@ -1290,7 +1290,12 @@ var __dirname = path.dirname(__filename);
 var PORT = Number(process.env.PORT) || 3e3;
 async function startServer() {
   const app2 = express();
-  app2.use(cors());
+  app2.use(cors({
+    origin: [
+      "https://phishtrap-scanner-client.vercel.app",
+      "http://localhost:5173"
+    ]
+  }));
   app2.use(express.json({ limit: "2mb" }));
   app2.use(express.urlencoded({ extended: true }));
   app2.get("/api/health", async (req, res) => {
