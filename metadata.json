@@ -1,0 +1,6 @@
+{
+  "name": "PHISHTRAP — Multi-Signal Phishing Detection Engine",
+  "description": "Production-quality cybersecurity platform analyzing URLs and domains across multiple intelligence signals to detect phishing attacks in real time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
