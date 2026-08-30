@@ -3,8 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { db } from './db';
-import { runMultiSignalEngine } from './engine';
+import { db } from './src/db';
+import { runMultiSignalEngine } from './src/engine';
 
 dotenv.config();
 
