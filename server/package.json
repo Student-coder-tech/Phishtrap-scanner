@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs",
+    "dev": "tsx watch index.ts",
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs",
     "start": "NODE_ENV=production node dist/server.mjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
