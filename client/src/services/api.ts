@@ -5,7 +5,10 @@
 
 import { OverviewMetrics, ScanReport, ScanResult, WatchlistBrand, HealthStatus } from '../types';
 
-const BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'https://phishtrap-scanner-server.vercel.app'}/api`;
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '');
+const BASE_URL = configuredApiBaseUrl
+  ? `${configuredApiBaseUrl.endsWith('/api') ? configuredApiBaseUrl : `${configuredApiBaseUrl}/api`}`
+  : '/api';
 
 export class ApiError extends Error {
   constructor(message: string, public status?: number) {
@@ -33,7 +36,7 @@ export const api = {
   async checkHealth(): Promise<HealthStatus> {
     try {
       const res = await fetch(`${BASE_URL}/health`);
-      return await res.json();
+      return await handleResponse<HealthStatus>(res);
     } catch (err: any) {
       return {
         status: 'error',

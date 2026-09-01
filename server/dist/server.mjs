@@ -1,6 +1,7 @@
 // index.ts
 import express from "express";
 import cors from "cors";
+import { existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -216,6 +217,12 @@ var INITIAL_SCANS = [
     engineUsed: "nodejs-multisignal"
   }
 ];
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function normalizeWatchlistDomain(value) {
+  return value.trim().replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+}
 var DatabaseService = class {
   client = null;
   mongoDb = null;
@@ -270,14 +277,14 @@ var DatabaseService = class {
       try {
         const query = {};
         if (filters?.search) {
-          const regex = new RegExp(filters.search, "i");
+          const regex = new RegExp(escapeRegExp(filters.search), "i");
           query.$or = [{ domain: regex }, { url: regex }, { matchedBrand: regex }];
         }
         if (filters?.risk && filters.risk !== "ALL") {
           query["risk.level"] = filters.risk;
         }
         if (filters?.brand && filters.brand !== "ALL") {
-          query.matchedBrand = new RegExp(`^${filters.brand}$`, "i");
+          query.matchedBrand = new RegExp(`^${escapeRegExp(filters.brand)}$`, "i");
         }
         const docs = await this.scansCollection.find(query).sort({ createdAt: -1 }).toArray();
         return docs.map((doc) => ({ ...doc, _id: doc._id.toString() }));
@@ -375,7 +382,7 @@ var DatabaseService = class {
       _id: id,
       id,
       name: brand.name.trim(),
-      domain: brand.domain.trim().toLowerCase(),
+      domain: normalizeWatchlistDomain(brand.domain),
       category: brand.category || "Banking",
       active: true,
       createdAt: now,
@@ -441,7 +448,7 @@ import dns from "dns";
 import tls from "tls";
 import http from "http";
 import https from "https";
-import { URL } from "url";
+import { URL as URL2 } from "url";
 var SUSPICIOUS_TLDS = /* @__PURE__ */ new Set([
   "xyz",
   "top",
@@ -574,7 +581,7 @@ function parseUrl(rawInput) {
     clean = "https://" + clean;
   }
   try {
-    const parsed = new URL(clean);
+    const parsed = new URL2(clean);
     const hostname = parsed.hostname.toLowerCase();
     const parts = hostname.split(".");
     const tld = parts.length > 1 ? parts[parts.length - 1] : "";
@@ -713,7 +720,7 @@ async function performLiveTlsProbe(hostname, port = 443) {
 async function performLiveRedirectProbe(targetUrl) {
   return new Promise((resolve) => {
     try {
-      const parsed = new URL(targetUrl);
+      const parsed = new URL2(targetUrl);
       const isHttps = parsed.protocol === "https:";
       const transport = isHttps ? https : http;
       const req = transport.request(
@@ -729,7 +736,7 @@ async function performLiveRedirectProbe(targetUrl) {
           let hasCrossDomainRedirect = false;
           if (location) {
             try {
-              const nextUrl = new URL(location, targetUrl);
+              const nextUrl = new URL2(location, targetUrl);
               hasCrossDomainRedirect = nextUrl.hostname !== parsed.hostname;
             } catch {
             }
@@ -1290,11 +1297,21 @@ var __dirname = path.dirname(__filename);
 var PORT = Number(process.env.PORT) || 3e3;
 async function startServer() {
   const app2 = express();
+  const configuredOrigins = (process.env.CORS_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean);
+  const allowedOrigins = /* @__PURE__ */ new Set([
+    "https://phishtrap-scanner-client.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    ...configuredOrigins
+  ]);
   app2.use(cors({
-    origin: [
-      "https://phishtrap-scanner-client.vercel.app",
-      "http://localhost:5173"
-    ]
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    }
   }));
   app2.use(express.json({ limit: "2mb" }));
   app2.use(express.urlencoded({ extended: true }));
@@ -1311,7 +1328,7 @@ async function startServer() {
           pythonStatus = "connected";
         }
       } catch {
-        pythonStatus = "offline-fallback";
+        pythonStatus = "offline";
       }
     }
     res.json({
@@ -1366,6 +1383,18 @@ async function startServer() {
         });
       }
       const normalizedMode = mode?.toUpperCase() === "LIVE" ? "LIVE" : "DEMO";
+      const normalizedTarget = /^https?:\/\//i.test(trimmedDomain) ? trimmedDomain : `https://${trimmedDomain}`;
+      try {
+        const targetUrl = new URL(normalizedTarget);
+        if (!targetUrl.hostname || !["http:", "https:"].includes(targetUrl.protocol)) {
+          throw new Error("Unsupported URL protocol");
+        }
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: { message: "Invalid target: provide a valid domain or an HTTP(S) URL." }
+        });
+      }
       const currentWatchlist = await db.getWatchlist();
       let analysisResult = null;
       const pyUrl = process.env.PYTHON_SERVICE_URL;
@@ -1377,7 +1406,7 @@ async function startServer() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              domain: trimmedDomain,
+              domain: normalizedTarget,
               mode: normalizedMode,
               watchlist: currentWatchlist
             }),
@@ -1392,7 +1421,7 @@ async function startServer() {
         }
       }
       if (!analysisResult) {
-        const result = await runMultiSignalEngine(trimmedDomain, normalizedMode, currentWatchlist);
+        const result = await runMultiSignalEngine(normalizedTarget, normalizedMode, currentWatchlist);
         const scanId = "scn_" + Math.random().toString(36).substring(2, 12);
         const timestamp = (/* @__PURE__ */ new Date()).toISOString();
         analysisResult = {
@@ -1553,7 +1582,7 @@ async function startServer() {
       const updated = await db.updateWatchlistBrand(id, {
         ...typeof active === "boolean" ? { active } : {},
         ...name ? { name: name.trim() } : {},
-        ...domain ? { domain: domain.trim().toLowerCase() } : {},
+        ...domain ? { domain: domain.trim().replace(/^https?:\/\//i, "").split("/")[0].toLowerCase() } : {},
         ...category ? { category } : {}
       });
       if (!updated) {
@@ -1595,7 +1624,11 @@ async function startServer() {
     }
   });
   if (process.env.NODE_ENV === "production") {
-    const distPath = path.resolve(__dirname, "../client/dist");
+    const candidateDistPaths = [
+      path.resolve(__dirname, "../../client/dist"),
+      path.resolve(__dirname, "../client/dist")
+    ];
+    const distPath = candidateDistPaths.find((candidate) => existsSync(candidate)) || candidateDistPaths[0];
     app2.use(express.static(distPath));
     app2.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

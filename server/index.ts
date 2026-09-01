@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -17,11 +18,26 @@ async function startServer() {
   const app = express();
 
   // Standard middleware
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const allowedOrigins = new Set([
+    'https://phishtrap-scanner-client.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    ...configuredOrigins,
+  ]);
+
   app.use(cors({
-    origin: [
-      'https://phishtrap-scanner-client.vercel.app',
-      'http://localhost:5173',
-    ],
+    origin: (origin, callback) => {
+      // Non-browser requests and same-origin browser requests do not send an Origin header.
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
   }));
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
@@ -45,7 +61,7 @@ async function startServer() {
           pythonStatus = 'connected';
         }
       } catch {
-        pythonStatus = 'offline-fallback';
+        pythonStatus = 'offline';
       }
     }
 
@@ -111,6 +127,21 @@ async function startServer() {
       }
 
       const normalizedMode = mode?.toUpperCase() === 'LIVE' ? 'LIVE' : 'DEMO';
+      const normalizedTarget = /^https?:\/\//i.test(trimmedDomain)
+        ? trimmedDomain
+        : `https://${trimmedDomain}`;
+
+      try {
+        const targetUrl = new URL(normalizedTarget);
+        if (!targetUrl.hostname || !['http:', 'https:'].includes(targetUrl.protocol)) {
+          throw new Error('Unsupported URL protocol');
+        }
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Invalid target: provide a valid domain or an HTTP(S) URL.' },
+        });
+      }
 
       // Retrieve active watchlist for cross-referencing
       const currentWatchlist = await db.getWatchlist();
@@ -127,7 +158,7 @@ async function startServer() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              domain: trimmedDomain,
+              domain: normalizedTarget,
               mode: normalizedMode,
               watchlist: currentWatchlist,
             }),
@@ -146,7 +177,7 @@ async function startServer() {
 
       // If python service wasn't used or failed, run built-in node engine
       if (!analysisResult) {
-        const result = await runMultiSignalEngine(trimmedDomain, normalizedMode, currentWatchlist);
+        const result = await runMultiSignalEngine(normalizedTarget, normalizedMode, currentWatchlist);
         const scanId = 'scn_' + Math.random().toString(36).substring(2, 12);
         const timestamp = new Date().toISOString();
 
@@ -334,7 +365,7 @@ async function startServer() {
       const updated = await db.updateWatchlistBrand(id, {
         ...(typeof active === 'boolean' ? { active } : {}),
         ...(name ? { name: name.trim() } : {}),
-        ...(domain ? { domain: domain.trim().toLowerCase() } : {}),
+        ...(domain ? { domain: domain.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase() } : {}),
         ...(category ? { category } : {}),
       });
 
@@ -389,7 +420,11 @@ async function startServer() {
   // /api requests to this server.
   // ----------------------------------------------------
   if (process.env.NODE_ENV === 'production') {
-    const distPath = path.resolve(__dirname, '../client/dist');
+    const candidateDistPaths = [
+      path.resolve(__dirname, '../../client/dist'),
+      path.resolve(__dirname, '../client/dist'),
+    ];
+    const distPath = candidateDistPaths.find((candidate) => existsSync(candidate)) || candidateDistPaths[0];
     app.use(express.static(distPath));
     app.get('*', (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));

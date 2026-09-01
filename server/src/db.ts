@@ -260,6 +260,14 @@ const INITIAL_SCANS: StoredScan[] = [
   }
 ];
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeWatchlistDomain(value: string): string {
+  return value.trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
+}
+
 class DatabaseService {
   private client: MongoClient | null = null;
   private mongoDb: Db | null = null;
@@ -326,14 +334,14 @@ class DatabaseService {
       try {
         const query: any = {};
         if (filters?.search) {
-          const regex = new RegExp(filters.search, 'i');
+          const regex = new RegExp(escapeRegExp(filters.search), 'i');
           query.$or = [{ domain: regex }, { url: regex }, { matchedBrand: regex }];
         }
         if (filters?.risk && filters.risk !== 'ALL') {
           query['risk.level'] = filters.risk;
         }
         if (filters?.brand && filters.brand !== 'ALL') {
-          query.matchedBrand = new RegExp(`^${filters.brand}$`, 'i');
+          query.matchedBrand = new RegExp(`^${escapeRegExp(filters.brand)}$`, 'i');
         }
 
         const docs = await this.scansCollection.find(query).sort({ createdAt: -1 }).toArray();
@@ -450,7 +458,7 @@ class DatabaseService {
       _id: id,
       id,
       name: brand.name.trim(),
-      domain: brand.domain.trim().toLowerCase(),
+      domain: normalizeWatchlistDomain(brand.domain),
       category: brand.category || 'Banking',
       active: true,
       createdAt: now,
